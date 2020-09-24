@@ -2,3 +2,5 @@
 *.class
 target
 .idea
+databin
+quorum_data

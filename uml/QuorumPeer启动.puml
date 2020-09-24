@@ -1,0 +1,17 @@
+@startuml
+
+skinparam backfroundColor #EEEBDC
+
+QuorumPeerMain -> QuorumPeerMain: main
+activate QuorumPeerMain
+QuorumPeerMain -> QuorumPeerMain: runFromConfig
+activate QuorumPeerMain
+QuorumPeerMain -> QuorumPeer: initialize 权限
+QuorumPeerMain -> QuorumPeer: start 启动
+QuorumPeerMain -> QuorumPeer: join 等待
+deactivate QuorumPeerMain
+deactivate QuorumPeerMain
+
+
+QuorumPeerMain -> ZooKeeperServerMain: main
+@enduml

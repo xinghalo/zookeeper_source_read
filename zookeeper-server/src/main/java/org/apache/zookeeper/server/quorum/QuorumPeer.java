@@ -476,8 +476,11 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     }
 
     public enum ServerState {
+        // 正在选主状态，不对外提供服务，直到选主完成
         LOOKING,
+        // 系统从节点
         FOLLOWING,
+        // 主节点，接收客户端更新，写入日志
         LEADING,
         OBSERVING
     }
@@ -1042,7 +1045,11 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         this.syncLimit = syncLimit;
         this.connectToLearnerMasterLimit = connectToLearnerMasterLimit;
         this.quorumListenOnAllIPs = quorumListenOnAllIPs;
+
+        // 初始化 快照日志
+        // 底层包括事务日志和快照数据两部分，分别是 FileTxnLog 和 FileSnap
         this.logFactory = new FileTxnSnapLog(dataLogDir, dataDir);
+        // 初始化 zkDatabase
         this.zkDb = new ZKDatabase(this.logFactory);
         if (quorumConfig == null) {
             quorumConfig = new QuorumMaj(quorumPeers);
@@ -1075,7 +1082,10 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         if (!getView().containsKey(myid)) {
             throw new RuntimeException("My id " + myid + " not in the peer list");
         }
+        // 恢复本地数据
         loadDataBase();
+
+        // 启动cnxn
         startServerCnxnFactory();
         try {
             adminServer.start();
@@ -1083,6 +1093,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             LOG.warn("Problem starting AdminServer", e);
             System.out.println(e);
         }
+        // 开始选举
         startLeaderElection();
         startJvmPauseMonitor();
         super.start();

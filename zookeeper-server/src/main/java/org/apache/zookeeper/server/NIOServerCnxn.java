@@ -321,10 +321,13 @@ public class NIOServerCnxn extends ServerCnxn {
                 return;
             }
             if (k.isReadable()) {
+                // 接收网络传输的数据
                 int rc = sock.read(incomingBuffer);
                 if (rc < 0) {
                     handleFailedRead();
                 }
+
+                // buffer满
                 if (incomingBuffer.remaining() == 0) {
                     boolean isPayload;
                     if (incomingBuffer == lenBuffer) { // start of next request
@@ -416,7 +419,9 @@ public class NIOServerCnxn extends ServerCnxn {
         if (!isZKServerRunning()) {
             throw new IOException("ZooKeeperServer not running");
         }
+        // 处理连接请求
         zkServer.processConnectRequest(this, incomingBuffer);
+        // TODO 啥时候成false的？
         initialized = true;
     }
 

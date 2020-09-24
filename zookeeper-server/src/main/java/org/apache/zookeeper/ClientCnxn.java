@@ -144,11 +144,13 @@ public class ClientCnxn {
 
     /**
      * These are the packets that have been sent and are waiting for a response.
+     * 服务端响应队列
      */
     private final Queue<Packet> pendingQueue = new ArrayDeque<>();
 
     /**
      * These are the packets that need to be sent.
+     * 客户端发送队列
      */
     private final LinkedBlockingDeque<Packet> outgoingQueue = new LinkedBlockingDeque<Packet>();
 
@@ -513,9 +515,12 @@ public class ClientCnxn {
                 return;
             }
             sessionState = event.getState();
+
+            // 从watcher中取出监听器
             final Set<Watcher> watchers;
             if (materializedWatchers == null) {
                 // materialize the watchers based on the event
+                // 取出 并 移除
                 watchers = watcher.materialize(event.getState(), event.getType(), event.getPath());
             } else {
                 watchers = new HashSet<Watcher>();
@@ -554,11 +559,13 @@ public class ClientCnxn {
         public void run() {
             try {
                 isRunning = true;
+                // 循环处理
                 while (true) {
                     Object event = waitingEvents.take();
                     if (event == eventOfDeath) {
                         wasKilled = true;
                     } else {
+                        // 处理事件Watcher
                         processEvent(event);
                     }
                     if (wasKilled) {
@@ -875,6 +882,7 @@ public class ClientCnxn {
         private boolean isFirstConnect = true;
 
         void readResponse(ByteBuffer incomingBuffer) throws IOException {
+            // 读取消息
             ByteBufferInputStream bbis = new ByteBufferInputStream(incomingBuffer);
             BinaryInputArchive bbia = BinaryInputArchive.getArchive(bbis);
             ReplyHeader replyHdr = new ReplyHeader();
@@ -896,10 +904,14 @@ public class ClientCnxn {
                 }
               return;
             case NOTIFICATION_XID:
-                LOG.debug("Got notification session id: 0x{}",
-                    Long.toHexString(sessionId));
+                LOG.debug("Got notification session id: 0x{}", Long.toHexString(sessionId));
+
+                // 1 反序列化生成 WatcherEvent
                 WatcherEvent event = new WatcherEvent();
                 event.deserialize(bbia, "response");
+
+                // 2 处理chrootPath，如果客户端配置了chrootPath属性，需要生成相对节点路径。
+                // 比如chrootPath为/app1，那么/app1/locks会被转换成/locks
 
                 // convert from a server path to a client path
                 if (chrootPath != null) {
@@ -914,8 +926,11 @@ public class ClientCnxn {
                      }
                 }
 
+                // 3 还原 WatchedEvent
                 WatchedEvent we = new WatchedEvent(event);
                 LOG.debug("Got {} for session id 0x{}", we, Long.toHexString(sessionId));
+
+                // 4 回调 EventThread处理消息
                 eventThread.queueEvent(we);
                 return;
             default:
@@ -1172,15 +1187,20 @@ public class ClientCnxn {
 
         @Override
         public void run() {
+            // 把 sessionId 和 outgoingQueue 注册到 cnxnSocket
             clientCnxnSocket.introduce(this, sessionId, outgoingQueue);
+            // 更新时间
             clientCnxnSocket.updateNow();
             clientCnxnSocket.updateLastSendAndHeard();
+
             int to;
             long lastPingRwServer = Time.currentElapsedTime();
             final int MAX_SEND_PING_INTERVAL = 10000; //10 seconds
             InetSocketAddress serverAddress = null;
+
             while (state.isAlive()) {
                 try {
+                    // 如果没有连接，则尝试连接服务器
                     if (!clientCnxnSocket.isConnected()) {
                         // don't re-establish connection if we are closing
                         if (closing) {
@@ -1190,12 +1210,17 @@ public class ClientCnxn {
                             serverAddress = rwServerAddress;
                             rwServerAddress = null;
                         } else {
+                            // 如果没有指定连接地址，则从hostProvider中选取一个服务器地址
+                            // hostProvider内部采用随机打散后，固定轮训
                             serverAddress = hostProvider.next(1000);
                         }
+                        // 开启连接
                         startConnect(serverAddress);
+                        // 更新心跳时间
                         clientCnxnSocket.updateLastSendAndHeard();
                     }
 
+                    // 统计连接时间
                     if (state.isConnected()) {
                         // determine whether we need to send an AuthFailed event.
                         if (zooKeeperSaslClient != null) {
@@ -1234,6 +1259,7 @@ public class ClientCnxn {
                         to = connectTimeout - clientCnxnSocket.getIdleRecv();
                     }
 
+                    // 判断连接是否超时
                     if (to <= 0) {
                         String warnInfo = String.format(
                             "Client session timed out, have not heard from server in %dms for session id 0x%s",
@@ -1242,6 +1268,7 @@ public class ClientCnxn {
                         LOG.warn(warnInfo);
                         throw new SessionTimeoutException(warnInfo);
                     }
+
                     if (state.isConnected()) {
                         //1000(1 second) is to prevent race condition missing to send the second ping
                         //also make sure not to send too many pings when readTimeout is small
@@ -1250,6 +1277,7 @@ public class ClientCnxn {
                                              - ((clientCnxnSocket.getIdleSend() > 1000) ? 1000 : 0);
                         //send a ping request either time is due or no packet sent out within MAX_SEND_PING_INTERVAL
                         if (timeToNextPing <= 0 || clientCnxnSocket.getIdleSend() > MAX_SEND_PING_INTERVAL) {
+                            // 发送ping消息
                             sendPing();
                             clientCnxnSocket.updateLastSend();
                         } else {
@@ -1272,6 +1300,7 @@ public class ClientCnxn {
                         to = Math.min(to, pingRwTimeout - idlePingRwServer);
                     }
 
+                    // 发送消息
                     clientCnxnSocket.doTransport(to, pendingQueue, ClientCnxn.this);
                 } catch (Throwable e) {
                     if (closing) {
@@ -1296,12 +1325,17 @@ public class ClientCnxn {
                 }
             }
 
+            // 客户端要关闭了，状态为CLOSED或AUTH_FAILED
             synchronized (state) {
                 // When it comes to this point, it guarantees that later queued
                 // packet to outgoingQueue will be notified of death.
                 cleanup();
             }
+
+            // 关闭socket
             clientCnxnSocket.close();
+
+            // 内部触发关闭的 Watcher 事件
             if (state.isAlive()) {
                 eventThread.queueEvent(new WatchedEvent(Event.EventType.None, Event.KeeperState.Disconnected, null));
             }

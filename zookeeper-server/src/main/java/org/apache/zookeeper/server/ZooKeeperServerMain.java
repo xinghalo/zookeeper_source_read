@@ -120,6 +120,7 @@ public class ZooKeeperServerMain {
      */
     public void runFromConfig(ServerConfig config) throws IOException, AdminServerException {
         LOG.info("Starting server");
+        // 数据管理器，支持日志文件和快照文件
         FileTxnSnapLog txnLog = null;
         try {
             try {
@@ -139,6 +140,8 @@ public class ZooKeeperServerMain {
             if (config.jvmPauseMonitorToRun) {
                 jvmPauseMonitor = new JvmPauseMonitor(config);
             }
+
+            // 配置tickTime 和 会话超时时间
             final ZooKeeperServer zkServer = new ZooKeeperServer(jvmPauseMonitor, txnLog, config.tickTime, config.minSessionTimeout, config.maxSessionTimeout, config.listenBacklog, null, config.initialConfig);
             txnLog.setServerStats(zkServer.serverStats());
 
@@ -160,12 +163,16 @@ public class ZooKeeperServerMain {
                 // zkServer has been started. So we don't need to start it again in secureCnxnFactory.
                 needStartZKServer = false;
             }
+
+            // 创建ServerCnxnFactory，早起为NIO，后来引入Netty
             if (config.getSecureClientPortAddress() != null) {
                 secureCnxnFactory = ServerCnxnFactory.createFactory();
                 secureCnxnFactory.configure(config.getSecureClientPortAddress(), config.getMaxClientCnxns(), config.getClientPortListenBacklog(), true);
+                // 启动主线程
                 secureCnxnFactory.startup(zkServer, needStartZKServer);
             }
 
+            // 创建容器管理器，恢复本地数据
             containerManager = new ContainerManager(
                 zkServer.getZKDatabase(),
                 zkServer.firstProcessor,

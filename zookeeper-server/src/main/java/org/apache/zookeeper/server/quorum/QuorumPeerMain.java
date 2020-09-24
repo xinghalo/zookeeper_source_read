@@ -85,6 +85,7 @@ public class QuorumPeerMain {
      * @param args path to the configfile
      */
     public static void main(String[] args) {
+        // 服务器端的入口
         QuorumPeerMain main = new QuorumPeerMain();
         try {
             main.initializeAndRun(args);
@@ -119,12 +120,17 @@ public class QuorumPeerMain {
     }
 
     protected void initializeAndRun(String[] args) throws ConfigException, IOException, AdminServerException {
+
+        // 解析配置文件
         QuorumPeerConfig config = new QuorumPeerConfig();
         if (args.length == 1) {
             config.parse(args[0]);
         }
 
         // Start and schedule the the purge task
+        // 启动历史文件清理器（事务日志 和 快照数据的定时清理）
+        // 默认snap快照文件保留最近3个
+        // 内部使用Timer实现的定时调度
         DatadirCleanupManager purgeMgr = new DatadirCleanupManager(
             config.getDataDir(),
             config.getDataLogDir(),
@@ -132,9 +138,12 @@ public class QuorumPeerMain {
             config.getPurgeInterval());
         purgeMgr.start();
 
+        // 判断是集群模式还是单机模式
+        // 如果 quorumVerifier 存在，且支持投票的节点数超过1，则为分布式模式（默认分布式环境需要至少3个点）
         if (args.length == 1 && config.isDistributed()) {
             runFromConfig(config);
         } else {
+            // 没有配置文件则为单机模式，直接启动ZooKeeperServerMain即可。
             LOG.warn("Either no config or no quorum defined in config, running in standalone mode");
             // there is only server in the quorum -- run as standalone
             ZooKeeperServerMain.main(args);
@@ -157,47 +166,70 @@ public class QuorumPeerMain {
         } catch (MetricsProviderLifeCycleException error) {
             throw new IOException("Cannot boot MetricsProvider " + config.getMetricsProviderClassName(), error);
         }
+
+        // 启动内部组件
         try {
             ServerMetrics.metricsProviderInitialized(metricsProvider);
+            // 非安全模式下的cnxn
             ServerCnxnFactory cnxnFactory = null;
+            // 安全模式下的cnxn
             ServerCnxnFactory secureCnxnFactory = null;
 
+            // 创建ServerCnxnFactory
             if (config.getClientPortAddress() != null) {
+                // 基于工厂方法创建 cnxn 工厂
                 cnxnFactory = ServerCnxnFactory.createFactory();
+                // 配置客户端端口号、最大客户端连接数、backlog（TODO 不知道干嘛的）、是否安全
                 cnxnFactory.configure(config.getClientPortAddress(), config.getMaxClientCnxns(), config.getClientPortListenBacklog(), false);
             }
 
+            // TODO 暂时忽略
             if (config.getSecureClientPortAddress() != null) {
                 secureCnxnFactory = ServerCnxnFactory.createFactory();
                 secureCnxnFactory.configure(config.getSecureClientPortAddress(), config.getMaxClientCnxns(), config.getClientPortListenBacklog(), true);
             }
 
+            // 创建QuorumPeer实例
             quorumPeer = getQuorumPeer();
+            // 创建数据管理器
             quorumPeer.setTxnFactory(new FileTxnSnapLog(config.getDataLogDir(), config.getDataDir()));
             quorumPeer.enableLocalSessions(config.areLocalSessionsEnabled());
             quorumPeer.enableLocalSessionsUpgrading(config.isLocalSessionsUpgradingEnabled());
             //quorumPeer.setQuorumPeers(config.getAllMembers());
+            // 服务器参与投票的数量，默认3，至少也是3
             quorumPeer.setElectionType(config.getElectionAlg());
+            // 配置 server id
             quorumPeer.setMyid(config.getServerId());
+            // tick time
             quorumPeer.setTickTime(config.getTickTime());
+            // 最小的 session 超时时间，默认 -1
             quorumPeer.setMinSessionTimeout(config.getMinSessionTimeout());
+            // 最大的 session 超时时间，默认 -1
             quorumPeer.setMaxSessionTimeout(config.getMaxSessionTimeout());
+            // TODO 初始化时间
             quorumPeer.setInitLimit(config.getInitLimit());
+            // TODO 同步时间
             quorumPeer.setSyncLimit(config.getSyncLimit());
             quorumPeer.setConnectToLearnerMasterLimit(config.getConnectToLearnerMasterLimit());
             quorumPeer.setObserverMasterPort(config.getObserverMasterPort());
             quorumPeer.setConfigFileName(config.getConfigFilename());
             quorumPeer.setClientPortListenBacklog(config.getClientPortListenBacklog());
+
+            // 创建内存数据库zkDatabase
             quorumPeer.setZKDatabase(new ZKDatabase(quorumPeer.getTxnFactory()));
+            // 配置集群校验器
             quorumPeer.setQuorumVerifier(config.getQuorumVerifier(), false);
             if (config.getLastSeenQuorumVerifier() != null) {
                 quorumPeer.setLastSeenQuorumVerifier(config.getLastSeenQuorumVerifier(), false);
             }
+            // 直接基于配置文件初始化DataTree树，节点为：/zookeeper/config
             quorumPeer.initConfigInZKDatabase();
+            // 配置 cnxn 工厂
             quorumPeer.setCnxnFactory(cnxnFactory);
             quorumPeer.setSecureCnxnFactory(secureCnxnFactory);
             quorumPeer.setSslQuorum(config.isSslQuorum());
             quorumPeer.setUsePortUnification(config.shouldUsePortUnification());
+            // 配置节点类型，参与者 or 观察者
             quorumPeer.setLearnerType(config.getPeerType());
             quorumPeer.setSyncEnabled(config.getSyncEnabled());
             quorumPeer.setQuorumListenOnAllIPs(config.getQuorumListenOnAllIPs());
@@ -217,15 +249,21 @@ public class QuorumPeerMain {
                 quorumPeer.setQuorumServerLoginContext(config.quorumServerLoginContext);
                 quorumPeer.setQuorumLearnerLoginContext(config.quorumLearnerLoginContext);
             }
+            // 配置 cnxn 线程数
             quorumPeer.setQuorumCnxnThreadsSize(config.quorumCnxnThreadsSize);
+
+            // 初始化 peer 权限相关
             quorumPeer.initialize();
 
             if (config.jvmPauseMonitorToRun) {
                 quorumPeer.setJvmPauseMonitor(new JvmPauseMonitor(config));
             }
 
+            // 启动主线程，加载本地存储文件、开启cnxn、开启投票、正常运行
             quorumPeer.start();
             ZKAuditProvider.addZKStartStopAuditLog();
+
+            // 主线程等待 quorumPeer 的运行
             quorumPeer.join();
         } catch (InterruptedException e) {
             // warn, but generally this is ok

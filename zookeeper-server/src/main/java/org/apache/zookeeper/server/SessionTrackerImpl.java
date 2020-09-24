@@ -91,8 +91,13 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
      */
     public static long initializeNextSessionId(long id) {
         long nextSid;
+        // 获取当前时间戳，左移24位，低位用0填充；然后右移8位，高位用1填充
+        // >>> 补零右移 >> 带符号的右移
+        // 左移24位的原因，目前时间戳24位刚好可以保证第一位是0；但时候面改成了无符号右移，其实就无所谓了
         nextSid = (Time.currentElapsedTime() << 24) >>> 8;
+        // 添加机器标识，右移56位，即低8位变成高8位
         nextSid = nextSid | (id << 56);
+        // 如果是数值已经为最大，则递增（不太可能的边缘情况）
         if (nextSid == EphemeralType.CONTAINER_EPHEMERAL_OWNER) {
             ++nextSid;  // this is an unlikely edge case, but check it just in case
         }
@@ -152,12 +157,14 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
     public void run() {
         try {
             while (running) {
+                // 获取最近的超时时间
                 long waitTime = sessionExpiryQueue.getWaitTime();
+                // 主线程等待time
                 if (waitTime > 0) {
                     Thread.sleep(waitTime);
                     continue;
                 }
-
+                // 获取快要过期的Session，轮训关闭
                 for (SessionImpl s : sessionExpiryQueue.poll()) {
                     ServerMetrics.getMetrics().STALE_SESSIONS_EXPIRED.add(1);
                     setSessionClosing(s.sessionId);
@@ -287,6 +294,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
                 + " session 0x" + Long.toHexString(id) + " " + sessionTimeout);
         }
 
+        // 激活session
         updateSessionExpiry(session, sessionTimeout);
         return added;
     }

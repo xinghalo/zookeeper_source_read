@@ -936,6 +936,7 @@ public class FastLeaderElection implements Election {
 
             int notTimeout = minNotificationInterval;
 
+            // 给自己投票
             synchronized (this) {
                 logicalclock.incrementAndGet();
                 updateProposal(getInitId(), getInitLastLoggedZxid(), getPeerEpoch());
@@ -945,6 +946,8 @@ public class FastLeaderElection implements Election {
                 "New election. My id = {}, proposed zxid=0x{}",
                 self.getId(),
                 Long.toHexString(proposedZxid));
+
+            // 投票信息发送给集群的每个服务器
             sendNotifications();
 
             SyncedLearnerTracker voteSet;
@@ -952,7 +955,7 @@ public class FastLeaderElection implements Election {
             /*
              * Loop in which we exchange notifications until we find a leader
              */
-
+            // 循环，直到选出Leader
             while ((self.getPeerState() == ServerState.LOOKING) && (!stop)) {
                 /*
                  * Remove next notification from queue, times out after 2 times
@@ -993,22 +996,27 @@ public class FastLeaderElection implements Election {
                             break;
                         }
                         // If notification > current, replace and send messages out
+                        // 判断投票是否已经过期，如果过期就删除之前的投票信息
                         if (n.electionEpoch > logicalclock.get()) {
                             logicalclock.set(n.electionEpoch);
                             recvset.clear();
+                            // 更新投票信息。对比收到的投票信息 与 当前自身的投票信息，epoch > zxid > sid
                             if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch, getInitId(), getInitLastLoggedZxid(), getPeerEpoch())) {
                                 updateProposal(n.leader, n.zxid, n.peerEpoch);
                             } else {
                                 updateProposal(getInitId(), getInitLastLoggedZxid(), getPeerEpoch());
                             }
+                            // 发送投票信息
                             sendNotifications();
                         } else if (n.electionEpoch < logicalclock.get()) {
-                                LOG.debug(
-                                    "Notification election epoch is smaller than logicalclock. n.electionEpoch = 0x{}, logicalclock=0x{}",
-                                    Long.toHexString(n.electionEpoch),
-                                    Long.toHexString(logicalclock.get()));
+                            LOG.debug(
+                                "Notification election epoch is smaller than logicalclock. n.electionEpoch = 0x{}, logicalclock=0x{}",
+                                Long.toHexString(n.electionEpoch),
+                                Long.toHexString(logicalclock.get()));
+                            // 如果投票信息小于当前记录，则直接丢弃
                             break;
                         } else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch, proposedLeader, proposedZxid, proposedEpoch)) {
+                            // 更新投票信息
                             updateProposal(n.leader, n.zxid, n.peerEpoch);
                             sendNotifications();
                         }

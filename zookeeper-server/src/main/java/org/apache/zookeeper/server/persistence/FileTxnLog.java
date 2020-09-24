@@ -271,6 +271,8 @@ public class FileTxnLog implements TxnLog, Closeable {
         if (hdr == null) {
             return false;
         }
+
+        // 检查请求中的zxid 是否 小于 当前zxid
         if (hdr.getZxid() <= lastZxidSeen) {
             LOG.warn(
                 "Current zxid {} is <= {} for {}",
@@ -280,9 +282,12 @@ public class FileTxnLog implements TxnLog, Closeable {
         } else {
             lastZxidSeen = hdr.getZxid();
         }
+
+        // 确定是否存在日志可写
+        // 当第一次事务日志写入 或 上一个事务日志写满时，都为null
         if (logStream == null) {
             LOG.info("Creating new log file: {}", Util.makeLogName(hdr.getZxid()));
-
+            // 新建事务日志
             logFileWrite = new File(logDir, Util.makeLogName(hdr.getZxid()));
             fos = new FileOutputStream(logFileWrite);
             logStream = new BufferedOutputStream(fos);
@@ -292,6 +297,7 @@ public class FileTxnLog implements TxnLog, Closeable {
             // Make sure that the magic number is written before padding.
             logStream.flush();
             filePadding.setCurrentSize(fos.getChannel().position());
+            // 记录落盘的文件流
             streamsToFlush.add(fos);
         }
         filePadding.padFile(fos.getChannel());
@@ -299,6 +305,7 @@ public class FileTxnLog implements TxnLog, Closeable {
         if (buf == null || buf.length == 0) {
             throw new IOException("Faulty serialization for header " + "and txn");
         }
+        // 生成crc校验值
         Checksum crc = makeChecksumAlgorithm();
         crc.update(buf, 0, buf.length);
         oa.writeLong(crc.getValue(), "txnEntryCRC");

@@ -1013,11 +1013,16 @@ public class ZooKeeper implements AutoCloseable {
             clientConfig = new ZKClientConfig();
         }
         this.clientConfig = clientConfig;
+
+        // 创建 WatchManager
         watchManager = defaultWatchManager();
         watchManager.defaultWatcher = watcher;
         ConnectStringParser connectStringParser = new ConnectStringParser(connectString);
+
+        // hostProvider，存放服务器管理列表
         hostProvider = aHostProvider;
 
+        // 创建并初始化 cnxn 网络连接器
         cnxn = createConnection(
             connectStringParser.getChrootPath(),
             hostProvider,

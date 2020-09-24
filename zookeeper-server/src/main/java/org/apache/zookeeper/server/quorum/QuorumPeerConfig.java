@@ -191,6 +191,7 @@ public class QuorumPeerConfig {
             /* Read entire config file as initial configuration */
             initialConfig = new String(Files.readAllBytes(configFile.toPath()));
 
+            // 解析配置文件
             parseProperties(cfg);
         } catch (IOException e) {
             throw new ConfigException("Error processing " + path, e);
@@ -503,7 +504,10 @@ public class QuorumPeerConfig {
 
         // backward compatibility - dynamic configuration in the same file as
         // static configuration params see writeDynamicConfig()
+
+        // 如果没有开启动态配置，通过分布式方式初始化配置文件
         if (dynamicConfigFileStr == null) {
+            // 分布式初始化
             setupQuorumPeerConfig(zkProp, true);
             if (isDistributed() && isReconfigEnabled()) {
                 // we don't backup static config for standalone mode.
@@ -676,10 +680,15 @@ public class QuorumPeerConfig {
     }
 
     void setupQuorumPeerConfig(Properties prop, boolean configBackwardCompatibilityMode) throws IOException, ConfigException {
+        // 创建校验器
         quorumVerifier = parseDynamicConfig(prop, electionAlg, true, configBackwardCompatibilityMode);
+        // 配置server id
         setupMyId();
+        // 配置客户端端口
         setupClientPort();
+        // 配置类型
         setupPeerType();
+        // 校验
         checkValidity();
     }
 

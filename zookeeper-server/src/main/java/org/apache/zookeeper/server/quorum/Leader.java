@@ -1592,6 +1592,34 @@ public class Leader extends LearnerMaster {
 
     /**
      * Get string representation of a given packet type
+     *
+     * 消息类型分为四类，分别为: 数据同步型、服务器初始化型、请求处理型、会话管理型
+     *
+     * 数据同步型：
+     * DIFF,     13, 通知Learner以DIFF方式进行数据同步
+     * TRUNC,    14, 通知Learner触发内存数据库回滚
+     * SNAP，    14，通知Learner触发全量数据快照
+     * UPTODATE，12，通知Learner完成数据同步
+     *
+     * 服务器初始化型：
+     * OBSERVERINFO，16，由O发送给L，向L注册自己，同时表明自己是O。包含O中的sid和zxid
+     * FOLLOWERINFO, 11, 由F启动发送给L，用于向L注册自己
+     * LEADERINFO, 17, Leader发送给Learner，告知本身的信息，包括epoch
+     * ACKEPOCH，18，Learner接收到leader的消息后，把自己的zxid和epoch发送给Leader
+     * NEWLEADER，10，发送选举完成阶段性消息
+     *
+     * 请求处理型：
+     * REQUEST, 1, zk的请求转发消息
+     * PROPOSAL, 2, ZAB协议中的提议
+     * ACK, 3, ZAB协议中的确认消息
+     * COMMIT, 4, ZAB协议中的提交
+     * INFORM, 8, 通知Observer提交事务（包含事务操作内容，因为Observer是没有proposal阶段的）。
+     * SYNC，7，通知Learner已经完成同步
+     *
+     * 会话管理型：
+     * PING, 5, Leader同步Learner上的客户端心跳
+     * REVALIDATE，6，用于Learner检测会话是否有效。
+     *
      * @param packetType
      * @return string representing the packet type
      */

@@ -670,11 +670,15 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         if (sessionTracker == null) {
             createSessionTracker();
         }
+        // 启动会话管理器
         startSessionTracker();
+
+        // 初始化请求链
         setupRequestProcessors();
 
         startRequestThrottler();
 
+        // 注册JMX
         registerJMX();
 
         startJvmPauseMonitor();
@@ -953,13 +957,19 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             // Possible since it's just deserialized from a packet on the wire.
             passwd = new byte[0];
         }
+
+        // 创建Session
         long sessionId = sessionTracker.createSession(timeout);
+
+        // 生成会话密码
         Random r = new Random(sessionId ^ superSecret);
         r.nextBytes(passwd);
         ByteBuffer to = ByteBuffer.allocate(4);
         to.putInt(timeout);
         cnxn.setSessionId(sessionId);
         Request si = new Request(cnxn, sessionId, 0, OpCode.createSession, to, null);
+
+        // 提交创建session请求
         submitRequest(si);
         return sessionId;
     }
@@ -1116,6 +1126,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             }
         }
         try {
+            // 重新激活session
             touch(si.cnxn);
             boolean validpacket = Request.isValid(si.type);
             if (validpacket) {
@@ -1327,7 +1338,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     @SuppressFBWarnings(value = "IS2_INCONSISTENT_SYNC", justification = "the value won't change after startup")
     public void processConnectRequest(ServerCnxn cnxn, ByteBuffer incomingBuffer)
         throws IOException, ClientCnxnLimitException {
-
+        // 反序列化ConnectRequest
         BinaryInputArchive bia = BinaryInputArchive.getArchive(new ByteBufferInputStream(incomingBuffer));
         ConnectRequest connReq = new ConnectRequest();
         connReq.deserialize(bia, "connect");
@@ -1357,6 +1368,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
 
         ServerMetrics.getMetrics().CONNECTION_REQUEST_COUNT.add(1);
 
+        // 判断是否为只读客户端
         boolean readOnly = false;
         try {
             readOnly = bia.readBool("readOnly");
@@ -1368,11 +1380,15 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
                 "Connection request from old client {}; will be dropped if server is in r-o mode",
                 cnxn.getRemoteSocketAddress());
         }
+
+        // 如果是非只读操作，本服务器还是只读服务器，那么会抛出异常
         if (!readOnly && this instanceof ReadOnlyZooKeeperServer) {
             String msg = "Refusing session request for not-read-only client " + cnxn.getRemoteSocketAddress();
             LOG.info(msg);
             throw new CloseRequestException(msg, ServerCnxn.DisconnectReason.CLIENT_ZXID_AHEAD);
         }
+
+        // 检查客户端你的zxid，如果客户端上次见过最新的zxid比当前服务器最新的zxid还大，说明当前服务器比较旧，抛出异常
         if (connReq.getLastZxidSeen() > zkDb.dataTree.lastProcessedZxid) {
             String msg = "Refusing session request for client "
                          + cnxn.getRemoteSocketAddress()
@@ -1385,6 +1401,9 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             LOG.info(msg);
             throw new CloseRequestException(msg, ServerCnxn.DisconnectReason.NOT_READ_ONLY_CLIENT);
         }
+
+        // 协商 超时时间，限制最小和最大的超时时间
+        // 默认服务器的超时时间再 2*tickTime ~ 20*tickTime 之间
         int sessionTimeout = connReq.getTimeOut();
         byte[] passwd = connReq.getPasswd();
         int minSessionTimeout = getMinSessionTimeout();
@@ -1399,6 +1418,8 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         // We don't want to receive any packets until we are sure that the
         // session is setup
         cnxn.disableRecv();
+
+        // 判断是否需要重新创建session
         if (sessionId == 0) {
             long id = createSession(cnxn, passwd, sessionTimeout);
             LOG.debug(

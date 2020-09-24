@@ -141,8 +141,11 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements Req
     }
 
     private boolean shouldSnapshot() {
+        // 当前事务日志的记录数
         int logCount = zks.getZKDatabase().getTxnCount();
+        // 上次快照的记录数
         long logSize = zks.getZKDatabase().getTxnSize();
+        // 事务日志记录 超过 快照数量*(0.5 ~ 1) 或者 日志文件
         return (logCount > (snapCount / 2 + randRoll))
                || (snapSizeInBytes > 0 && logSize > (snapSizeInBytes / 2 + randSize));
     }
@@ -178,15 +181,20 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements Req
                 ServerMetrics.getMetrics().SYNC_PROCESSOR_QUEUE_TIME.add(startProcessTime - si.syncQueueStartTime);
 
                 // track the number of records written to the log
+                // 写入到事务日志里面，zkDatabase.append 会触发写入操作
                 if (zks.getZKDatabase().append(si)) {
+                    // 如果写入成功，继续判断是否进行数据快照
                     if (shouldSnapshot()) {
+                        // 刷新下一次触发日志的时机
                         resetSnapshotStats();
                         // roll the log
+                        // 刷写事务日志，并刷新纪录数
                         zks.getZKDatabase().rollLog();
                         // take a snapshot
                         if (!snapThreadMutex.tryAcquire()) {
                             LOG.warn("Too busy to snap, skipping");
                         } else {
+                            // 新建线程异步写入快照文件
                             new ZooKeeperThread("Snapshot Thread") {
                                 public void run() {
                                     try {

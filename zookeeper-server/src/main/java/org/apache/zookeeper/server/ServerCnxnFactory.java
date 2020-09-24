@@ -157,11 +157,19 @@ public abstract class ServerCnxnFactory {
 
     public abstract void closeAll(ServerCnxn.DisconnectReason reason);
 
+    /**
+     * 创建 Server cnxn 工厂
+     */
     public static ServerCnxnFactory createFactory() throws IOException {
+        // 通过配置文件获取实现类名字
         String serverCnxnFactoryName = System.getProperty(ZOOKEEPER_SERVER_CNXN_FACTORY);
+
+        // 如果实现类为空，默认使用NIO版本
         if (serverCnxnFactoryName == null) {
             serverCnxnFactoryName = NIOServerCnxnFactory.class.getName();
         }
+
+        // 基于反射创建 cnxn 工厂
         try {
             ServerCnxnFactory serverCnxnFactory = (ServerCnxnFactory) Class.forName(serverCnxnFactoryName)
                                                                            .getDeclaredConstructor()
